@@ -35,10 +35,11 @@ func (r *authorResolver) Poems(ctx context.Context, obj *database.Author, page *
 
 // PoemCount is the resolver for the poemCount field.
 //
-// 这里以及 Dynasty、PoetryType 上的计数都走默认的简体表：
-// 简繁两套表是同一份语料的互转结果，计数完全一致。
+// 计数字段没有自己的 lang 参数，语言变体沿用外层查询的，见 langFromContext：
+// 一次查询选定的语言必须贯穿数量字段，而不是让数量悄悄读另一套表。
+// 简繁两套表是同一份语料的互转结果，计数取值一致，但读哪套表仍要与顶层相同。
 func (r *authorResolver) PoemCount(ctx context.Context, obj *database.Author) (int, error) {
-	return r.repo(ctx, database.LangHans).CountPoemsByAuthor(obj.ID)
+	return r.repo(ctx, langFromContext(ctx)).CountPoemsByAuthor(obj.ID)
 }
 
 // Node is the resolver for the node field.
@@ -47,13 +48,15 @@ func (r *authorEdgeResolver) Node(ctx context.Context, obj *database.AuthorEdge)
 }
 
 // PoemCount is the resolver for the poemCount field.
+// 语言变体沿用外层查询的，见 langFromContext。
 func (r *dynastyResolver) PoemCount(ctx context.Context, obj *database.Dynasty) (int, error) {
-	return r.repo(ctx, database.LangHans).CountPoemsByDynasty(obj.ID)
+	return r.repo(ctx, langFromContext(ctx)).CountPoemsByDynasty(obj.ID)
 }
 
 // AuthorCount is the resolver for the authorCount field.
+// 语言变体沿用外层查询的，见 langFromContext。
 func (r *dynastyResolver) AuthorCount(ctx context.Context, obj *database.Dynasty) (int, error) {
-	return r.repo(ctx, database.LangHans).CountAuthorsByDynasty(obj.ID)
+	return r.repo(ctx, langFromContext(ctx)).CountAuthorsByDynasty(obj.ID)
 }
 
 // Content is the resolver for the content field.
@@ -66,8 +69,9 @@ func (r *poemResolver) Content(ctx context.Context, obj *database.Poem) ([]strin
 }
 
 // PoemCount is the resolver for the poemCount field.
+// 语言变体沿用外层查询的，见 langFromContext。
 func (r *poetryTypeResolver) PoemCount(ctx context.Context, obj *database.PoetryType) (int, error) {
-	return r.repo(ctx, database.LangHans).CountPoemsByType(obj.ID)
+	return r.repo(ctx, langFromContext(ctx)).CountPoemsByType(obj.ID)
 }
 
 // Poem is the resolver for the poem field.
@@ -242,8 +246,11 @@ func (r *queryResolver) PoemTypes(ctx context.Context, lang *database.Lang) ([]*
 }
 
 // Statistics is the resolver for the statistics field.
+//
+// 统计里嵌套的朝代、体裁及其分类名都来自对应语言变体的表，
+// 因此这里必须带上外层 lang，否则繁体页面会在统计区混排简体名称。
 func (r *queryResolver) Statistics(ctx context.Context, lang *database.Lang) (*database.Statistics, error) {
-	return r.repo(ctx, database.LangHans).GetStatistics()
+	return r.repo(ctx, parseLang(lang)).GetStatistics()
 }
 
 // PoemsByDynasty is the resolver for the poemsByDynasty field.
