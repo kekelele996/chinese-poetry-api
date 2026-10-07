@@ -1,6 +1,12 @@
 server:
   port: 1279
   mode: release  # debug, release, test
+  # 优雅退出：收到终止信号后先摘流（就绪探针返回 503），等待 drain_delay
+  # 让负载均衡把实例移出流量列表，再关闭监听器并给在途请求 shutdown_timeout
+  # 的时间自然结束，超时强制断开。两者之和应小于编排平台的终止宽限期。
+  # 可用环境变量 DRAIN_DELAY / SHUTDOWN_TIMEOUT 覆盖。
+  drain_delay: 5s
+  shutdown_timeout: 20s
 
 database:
   # Connection pool settings (0 = auto-detect based on CPU cores)

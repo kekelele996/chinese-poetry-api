@@ -3,6 +3,9 @@ services:
     image: palemoky/chinese-poetry-api:latest
     container_name: poetry-api
     restart: unless-stopped
+    # 与进程内 drain_delay(5s) + shutdown_timeout(20s) 对齐并留出余量，
+    # 否则宽限期一到平台直接 SIGKILL，在途请求来不及自然结束。
+    stop_grace_period: 30s
     env_file: .env
     ports:
       - "${PORT:-1279}:${PORT:-1279}"

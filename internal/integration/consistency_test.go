@@ -21,6 +21,7 @@ import (
 	"github.com/palemoky/chinese-poetry-api/internal/database"
 	"github.com/palemoky/chinese-poetry-api/internal/graph"
 	"github.com/palemoky/chinese-poetry-api/internal/graph/generated"
+	"github.com/palemoky/chinese-poetry-api/internal/health"
 )
 
 // setupTestEnv 搭建同时包含 REST 与 GraphQL 的测试环境。
@@ -37,11 +38,20 @@ func setupTestEnv(t *testing.T) (*gin.Engine, *client.Client, *database.Reposito
 
 	repo := database.NewRepository(db)
 
+	// 探针直接 ping 底层连接池，并把实例标记为就绪，业务路由才会放行
+	sqlDB, err := db.DB.DB()
+	require.NoError(t, err)
+	checker := health.NewChecker(sqlDB)
+	checker.MarkReady()
+
 	// 初始化 REST 路由
 	cfg := &config.Config{
 		Server: config.ServerConfig{Mode: "test"},
 	}
-	restRouter := rest.SetupRouter(cfg, db, repo)
+	restRouter, rateLimiter := rest.SetupRouter(cfg, db, repo, checker)
+	if rateLimiter != nil {
+		t.Cleanup(rateLimiter.Stop)
+	}
 
 	// 初始化 GraphQL 客户端
 	resolver := graph.NewResolver(db, repo)

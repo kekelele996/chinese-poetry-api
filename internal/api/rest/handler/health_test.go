@@ -15,51 +15,6 @@ import (
 	"github.com/palemoky/chinese-poetry-api/internal/database"
 )
 
-func TestHealthHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	// 创建内存数据库
-	gormDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-
-	db := &database.DB{DB: gormDB}
-
-	router := gin.New()
-	router.GET("/health", HealthHandler(db))
-
-	tests := []struct {
-		name           string
-		expectedStatus int
-		checkResponse  func(*testing.T, map[string]any)
-	}{
-		{
-			name:           "healthy database",
-			expectedStatus: http.StatusOK,
-			checkResponse: func(t *testing.T, resp map[string]any) {
-				assert.Equal(t, "healthy", resp["status"])
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/health", nil)
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			assert.Equal(t, tt.expectedStatus, w.Code)
-
-			if tt.checkResponse != nil {
-				var response map[string]any
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				require.NoError(t, err)
-				tt.checkResponse(t, response)
-			}
-		})
-	}
-}
-
 func TestStatsHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

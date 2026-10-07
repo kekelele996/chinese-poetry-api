@@ -44,7 +44,10 @@ ENV PORT=1279 \
 
 EXPOSE 1279
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/api/v1/health || exit 1
+# 就绪探针：初始化（首次下载数据库、迁移）期间 /readyz 返回 503，
+# start-period 内的失败不计入重试，避免慢启动被误判为不健康。
+# 存活探针为 /livez（进程可响应即 200），供 Kubernetes 等平台分别配置。
+HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/readyz || exit 1
 
 CMD ["./startup.sh"]

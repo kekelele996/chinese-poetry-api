@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -22,6 +23,14 @@ type Config struct {
 type ServerConfig struct {
 	Port int    `mapstructure:"port"`
 	Mode string `mapstructure:"mode"`
+
+	// DrainDelay 收到终止信号后、关闭监听器前的摘流等待，
+	// 给负载均衡留出把实例移出端点列表的收敛时间。
+	DrainDelay time.Duration `mapstructure:"drain_delay"`
+
+	// ShutdownTimeout 关闭监听器后，等待在途请求自然结束的最长时间；
+	// 超时仍未结束的请求会被强制断开。
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
 }
 
 // DatabaseConfig 是数据库配置。
@@ -93,6 +102,11 @@ func Load(configPath string) (*Config, error) {
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.mode", "release")
+	// 优雅退出：先摘流 5s 等 LB 收敛，再给在途请求 20s 自然结束。
+	// 两者之和应小于编排平台的终止宽限期（如 Kubernetes
+	// terminationGracePeriodSeconds，建议 30s 以上）。
+	v.SetDefault("server.drain_delay", 5*time.Second)
+	v.SetDefault("server.shutdown_timeout", 20*time.Second)
 	v.SetDefault("download.enabled", true)
 	v.SetDefault("download.release_version", "latest")
 	v.SetDefault("rate_limit.enabled", true)
@@ -118,6 +132,18 @@ func bindEnvVars(v *viper.Viper) {
 	}
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		v.Set("server.mode", mode)
+	}
+
+	// 优雅退出时长，接受 time.Duration 字符串（如 5s、1m）
+	if d := os.Getenv("DRAIN_DELAY"); d != "" {
+		if parsed, err := time.ParseDuration(d); err == nil {
+			v.Set("server.drain_delay", parsed)
+		}
+	}
+	if d := os.Getenv("SHUTDOWN_TIMEOUT"); d != "" {
+		if parsed, err := time.ParseDuration(d); err == nil {
+			v.Set("server.shutdown_timeout", parsed)
+		}
 	}
 
 	// 数据目录写死，与 docker-compose 中挂载的卷保持一致
@@ -163,6 +189,14 @@ func (c *Config) Validate() error {
 
 	if c.Server.Mode != "debug" && c.Server.Mode != "release" && c.Server.Mode != "test" {
 		return fmt.Errorf("invalid server mode: %s (must be 'debug', 'release', or 'test')", c.Server.Mode)
+	}
+
+	if c.Server.DrainDelay < 0 {
+		return fmt.Errorf("server.drain_delay cannot be negative: %s", c.Server.DrainDelay)
+	}
+
+	if c.Server.ShutdownTimeout < 0 {
+		return fmt.Errorf("server.shutdown_timeout cannot be negative: %s", c.Server.ShutdownTimeout)
 	}
 
 	if c.Database.Path == "" {

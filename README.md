@@ -76,7 +76,13 @@ git submodule update --init --depth 1
 ### REST API
 
 ```bash
-# 健康检查
+# 存活探针：进程可响应即 200，初始化期间也保持成功
+curl "http://localhost:1279/livez"
+
+# 就绪探针：初始化完成、数据库可达才 200，摘流退出期间返回 503
+curl "http://localhost:1279/readyz"
+
+# 健康检查（历史路径，语义同 /readyz）
 curl "http://localhost:1279/api/v1/health"
 
 # 统计信息
