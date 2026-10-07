@@ -67,6 +67,16 @@ type GraphQLConfig struct {
 	// ComplexityLimit 是单个查询允许的最大复杂度，分页字段的开销按 pageSize 倍数计入，
 	// 用来挡住层层嵌套、一次请求放大成海量查询的写法。
 	ComplexityLimit int `mapstructure:"complexity_limit"`
+	// MaxDepth 限制 fragment 展开后的字段嵌套层数，挡住「一次要很多层」的查询。
+	MaxDepth int `mapstructure:"max_depth"`
+	// MaxAliases 限制同一选择集内同一字段被不同别名重复选取的次数，
+	// 挡住「同一字段用多个别名反复取」的扇出写法。
+	MaxAliases int `mapstructure:"max_aliases"`
+	// MaxNodeCount 限制一次操作展开 fragment 后可选取的字段总数，
+	// 作为浅而宽的扇出查询的兜底门槛。
+	MaxNodeCount int `mapstructure:"max_node_count"`
+	// MaxBodyBytes 限制单个 GraphQL 请求体的字节数，防止超大文档在解析前耗尽内存。
+	MaxBodyBytes int64 `mapstructure:"max_body_bytes"`
 }
 
 // SearchConfig 是搜索相关配置。
@@ -122,6 +132,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("graphql.playground", false)
 	v.SetDefault("graphql.introspection", true)
 	v.SetDefault("graphql.complexity_limit", 5000)
+	// 结构性查询门槛，在 resolver 执行前生效；取值依据见 internal/graph/querylimits.go
+	v.SetDefault("graphql.max_depth", 10)
+	v.SetDefault("graphql.max_aliases", 5)
+	v.SetDefault("graphql.max_node_count", 2000)
+	// 1 MiB：正常查询只有几 KB，大查询也有几十倍余量
+	v.SetDefault("graphql.max_body_bytes", 1<<20)
 	v.SetDefault("search.max_results", 1000)
 	v.SetDefault("search.default_page_size", 20)
 	// 数据库连接池，0 表示自动推算（在 Load 中依据 runtime.NumCPU 确定）
@@ -166,6 +182,33 @@ func bindEnvVars(v *viper.Viper) {
 		}
 	}
 
+	// GraphQL 查询门槛，部署时可按客户端形态调整
+	if limit := os.Getenv("GRAPHQL_COMPLEXITY_LIMIT"); limit != "" {
+		if n, err := strconv.Atoi(limit); err == nil {
+			v.Set("graphql.complexity_limit", n)
+		}
+	}
+	if depth := os.Getenv("GRAPHQL_MAX_DEPTH"); depth != "" {
+		if n, err := strconv.Atoi(depth); err == nil {
+			v.Set("graphql.max_depth", n)
+		}
+	}
+	if aliases := os.Getenv("GRAPHQL_MAX_ALIASES"); aliases != "" {
+		if n, err := strconv.Atoi(aliases); err == nil {
+			v.Set("graphql.max_aliases", n)
+		}
+	}
+	if nodes := os.Getenv("GRAPHQL_MAX_NODE_COUNT"); nodes != "" {
+		if n, err := strconv.Atoi(nodes); err == nil {
+			v.Set("graphql.max_node_count", n)
+		}
+	}
+	if bodyBytes := os.Getenv("GRAPHQL_MAX_BODY_BYTES"); bodyBytes != "" {
+		if n, err := strconv.ParseInt(bodyBytes, 10, 64); err == nil {
+			v.Set("graphql.max_body_bytes", n)
+		}
+	}
+
 	// 数据库连接池
 	if maxOpen := os.Getenv("DB_MAX_OPEN_CONNS"); maxOpen != "" {
 		if m, err := strconv.Atoi(maxOpen); err == nil {
@@ -201,6 +244,18 @@ func (c *Config) Validate() error {
 
 	if c.GraphQL.ComplexityLimit <= 0 {
 		return fmt.Errorf("graphql complexity_limit must be positive")
+	}
+	if c.GraphQL.MaxDepth <= 0 {
+		return fmt.Errorf("graphql max_depth must be positive")
+	}
+	if c.GraphQL.MaxAliases <= 0 {
+		return fmt.Errorf("graphql max_aliases must be positive")
+	}
+	if c.GraphQL.MaxNodeCount <= 0 {
+		return fmt.Errorf("graphql max_node_count must be positive")
+	}
+	if c.GraphQL.MaxBodyBytes <= 0 {
+		return fmt.Errorf("graphql max_body_bytes must be positive")
 	}
 
 	if c.RateLimit.RequestsPerSecond <= 0 {

@@ -24,8 +24,29 @@ func TestServerRejectsOverlyComplexQuery(t *testing.T) {
 	resolver, _ := setupTestResolver(t)
 	c := client.New(NewServer(resolver, ServerOptions{ComplexityLimit: 5000}))
 
+	// nestedQuery 同时有 11 层嵌套和指数级分页放大：结构性深度门槛先命中，
+	// 无论哪道门槛生效，重查询都必须在 resolver 之前被挡下。
 	var resp map[string]any
 	err := c.Post(nestedQuery, &resp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), errCodeMaxDepth)
+}
+
+// TestServerRejectsByComplexityWithinDepth 验证深度合法（7 层）但分页连乘
+// 把复杂度推过上限时，仍然是复杂度门槛负责拦截。
+func TestServerRejectsByComplexityWithinDepth(t *testing.T) {
+	resolver, _ := setupTestResolver(t)
+	c := client.New(NewServer(resolver, ServerOptions{ComplexityLimit: 5000}))
+
+	const q = `{
+  authors(pageSize: 100) {
+    edges { node { poems(pageSize: 100) {
+      edges { node { title } }
+    } } }
+  }
+}`
+	var resp map[string]any
+	err := c.Post(q, &resp)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "complexity")
 }

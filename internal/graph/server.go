@@ -18,6 +18,13 @@ type ServerOptions struct {
 	ComplexityLimit int
 	// Introspection 控制是否允许内省查询。
 	Introspection bool
+
+	// MaxDepth 限制 fragment 展开后的字段嵌套层数；<=0 时用默认值。
+	MaxDepth int
+	// MaxAliases 限制同一选择集内同一字段被别名重复选取的次数；<=0 时用默认值。
+	MaxAliases int
+	// MaxNodeCount 限制一次操作选取的字段总数；<=0 时用默认值。
+	MaxNodeCount int
 }
 
 // NewServer 构造 GraphQL 服务。
@@ -25,7 +32,9 @@ type ServerOptions struct {
 // 不用 handler.NewDefaultServer：它没有任何复杂度限制，而 schema 中
 // Poem.author → Author.poems → Poem.author … 可以无限嵌套，
 // 一个请求就能放大成成千上万次数据库查询，按请求计数的限流对此无能为力。
-// 这里只启用实际用到的 POST 传输，并对分页字段按 pageSize 计算复杂度。
+// 这里只启用实际用到的 POST 传输，并在 resolver 执行前串起三道结构门槛：
+// QueryLimits（深度/别名/字段总数）、对分页字段按 pageSize 计算的复杂度上限。
+// 被拦下的请求会收到带字段位置的 GraphQL 错误，且一次数据库连接都不会占用。
 func NewServer(resolver *Resolver, opts ServerOptions) *handler.Server {
 	cfg := generated.Config{Resolvers: resolver}
 	setComplexity(&cfg.Complexity)
@@ -43,6 +52,14 @@ func NewServer(resolver *Resolver, opts ServerOptions) *handler.Server {
 	srv.Use(extension.AutomaticPersistedQuery{
 		Cache: lru.New[string](100),
 	})
+
+	// 结构性门槛先于复杂度执行：别名扇出、纯嵌套过深这类复杂度估算不敏感的
+	// 写法在这里被挡下；复杂度上限继续负责分页放大（pageSize 乘积）。
+	srv.Use(normalizeLimits(QueryLimits{
+		MaxDepth:     opts.MaxDepth,
+		MaxAliases:   opts.MaxAliases,
+		MaxNodeCount: opts.MaxNodeCount,
+	}))
 	srv.Use(extension.FixedComplexityLimit(opts.ComplexityLimit))
 
 	return srv

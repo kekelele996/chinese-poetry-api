@@ -24,6 +24,13 @@ graphql:
   introspection: true
   # Max query complexity; paginated fields count as child cost x pageSize
   complexity_limit: 5000
+  # Structural query limits, enforced before any resolver runs (env overrides:
+  # GRAPHQL_MAX_DEPTH / GRAPHQL_MAX_ALIASES / GRAPHQL_MAX_NODE_COUNT /
+  # GRAPHQL_MAX_BODY_BYTES / GRAPHQL_COMPLEXITY_LIMIT)
+  max_depth: 10         # max field nesting depth after fragment expansion
+  max_aliases: 5        # max times one field may be selected via aliases per selection set
+  max_node_count: 2000  # max selected fields in one operation
+  max_body_bytes: 1048576  # max request body size in bytes (1 MiB)
 
 search:
   max_results: 1000

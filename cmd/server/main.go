@@ -30,11 +30,21 @@ const (
 )
 
 // graphqlHandler 构造 GraphQL 请求的 Gin handler。
+//
+// 请求先经过请求体大小限制，再进入 gqlgen：超大请求体在读入内存前就被挡回，
+// 其余结构性门槛（深度/别名/字段数/复杂度）在 resolver 执行前生效，
+// 被拦截的请求不会占用数据库连接。
 func graphqlHandler(resolver *graph.Resolver, cfg config.GraphQLConfig) gin.HandlerFunc {
-	h := graph.NewServer(resolver, graph.ServerOptions{
-		ComplexityLimit: cfg.ComplexityLimit,
-		Introspection:   cfg.Introspection,
-	})
+	h := graph.MaxBytesHandler(
+		graph.NewServer(resolver, graph.ServerOptions{
+			ComplexityLimit: cfg.ComplexityLimit,
+			Introspection:   cfg.Introspection,
+			MaxDepth:        cfg.MaxDepth,
+			MaxAliases:      cfg.MaxAliases,
+			MaxNodeCount:    cfg.MaxNodeCount,
+		}),
+		cfg.MaxBodyBytes,
+	)
 
 	return func(c *gin.Context) {
 		h.ServeHTTP(c.Writer, c.Request)
@@ -101,6 +111,13 @@ func main() {
 
 	// 注册 GraphQL 相关路由
 	router.POST("/graphql", graphqlHandler(resolver, cfg.GraphQL))
+	logger.Info("GraphQL query limits enabled",
+		zap.Int("complexity_limit", cfg.GraphQL.ComplexityLimit),
+		zap.Int("max_depth", cfg.GraphQL.MaxDepth),
+		zap.Int("max_aliases", cfg.GraphQL.MaxAliases),
+		zap.Int("max_node_count", cfg.GraphQL.MaxNodeCount),
+		zap.Int64("max_body_bytes", cfg.GraphQL.MaxBodyBytes),
+	)
 	if cfg.GraphQL.Playground {
 		router.GET("/playground", playgroundHandler())
 		logger.Info("GraphQL Playground enabled", zap.String("path", "/playground"))
